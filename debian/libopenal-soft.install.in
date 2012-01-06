@@ -1,0 +1,4 @@
+# if your module, creates shared libraries
+@PREFIX@/lib/*.so*
+@PREFIX@/bin/*
+/etc/openal/alsoft.conf
