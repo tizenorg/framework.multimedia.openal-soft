@@ -2,8 +2,8 @@ Name:       openal-soft
 Summary:    OpenAL library software implementation
 Version:    1.13
 Release:    4
-Group:      TO_BE/FILLED_IN
-License:    TO BE FILLED IN
+Group:      Multimedia/openal-soft
+License:    LGPLv2+ 
 Source0:    %{name}-%{version}.tar.gz
 BuildRequires: cmake
 BuildRequires: pkgconfig(avsysaudio)
