@@ -5,6 +5,7 @@ Release:    4
 Group:      Multimedia/openal-soft
 License:    LGPLv2+ 
 Source0:    %{name}-%{version}.tar.gz
+Source1001: packaging/openal-soft.manifest 
 BuildRequires: cmake
 BuildRequires: pkgconfig(avsysaudio)
 BuildRequires: pkgconfig(mm-session)
@@ -32,6 +33,7 @@ OpenAL library software implementation development package
 %setup -q
 
 %build
+cp %{SOURCE1001} .
 
 %ifarch %arm
 export CFLAGS+=" -DARM_ARCH -O3 -ftree-vectorize -ffast-math -fsingle-precision-constant -DUSE_DLOG "
@@ -54,11 +56,13 @@ rm -rf %{buildroot}
 
 
 %files
+%manifest openal-soft.manifest
 %{_libdir}/*.so*
 %{_bindir}/*
 /etc/openal/alsoft.conf
 
 %files devel
+%manifest openal-soft.manifest
 %{_includedir}/*
 %{_libdir}/pkgconfig/*
 
