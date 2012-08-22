@@ -1,7 +1,0 @@
-openal-soft (1.13-4slp2+9) unstable; urgency=low
-
-  * Initial release
-  * Git: pkgs/o/openal-soft
-  * Tag: openal-soft_1.13-4slp2+9
-
- -- Seungbae Shin <seungbae.shin@samsung.com>  Wed, 07 Dec 2011 11:18:53 +0900

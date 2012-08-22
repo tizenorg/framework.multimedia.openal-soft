@@ -189,7 +189,7 @@ static ALCboolean avsystem_open_playback(ALCdevice *device, const ALCchar *devic
     data->param.priority = AVSYS_AUDIO_PRIORITY_0;
     data->param.channels = ChannelsFromDevFmt(device->FmtChans);;
     data->param.samplerate = device->Frequency;
-    data->param.bluetooth = 0;
+    data->param.handle_route = 0;
     data->param.vol_type = AVSYS_AUDIO_VOLUME_TYPE_MEDIA;
 
     switch(device->FmtType)
