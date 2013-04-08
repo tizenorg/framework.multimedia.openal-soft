@@ -39,7 +39,7 @@ export CFLAGS+=" -DARM_ARCH -O3 -ftree-vectorize -ffast-math -fsingle-precision-
 export CFLAGS+=" -DI386_ARCH "
 %endif
 
-cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
+%cmake .
 make %{?jobs:-j%jobs}
 
 %install
