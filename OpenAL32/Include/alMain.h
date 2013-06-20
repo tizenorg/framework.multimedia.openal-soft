@@ -13,6 +13,17 @@
 #include "AL/alc.h"
 #include "AL/alext.h"
 
+#ifdef USE_ASM_IN_AL
+#include <audio-session-manager.h>
+#include <mm_session.h>
+#include <mm_session_private.h>
+#endif
+#include <dlog.h>
+#define LOG_TAG	"MM_OPENAL"
+#define func_in() SLOG(LOG_VERBOSE, LOG_TAG, "<< %s\n", __FUNCTION__)
+#define func_out() SLOG(LOG_VERBOSE, LOG_TAG, ">> %s\n", __FUNCTION__)
+
+
 #ifndef AL_EXT_sample_buffer_object
 #define AL_EXT_sample_buffer_object 1
 typedef ptrdiff_t ALintptrEXT;
@@ -436,6 +447,13 @@ struct ALCcontext_struct
     struct ALdatabuffer *SampleSink;
 
     ALenum      LastError;
+
+#ifdef USE_ASM_IN_AL
+    int         ASM_handle;
+    ASM_sound_events_t     ASM_event;
+    ALuint *Sources;
+    ALsizei NumOfSources;
+#endif
 
     ALboolean   Suspended;
 

@@ -1,9 +1,9 @@
 Name:       openal-soft
 Summary:    OpenAL library software implementation
 Version:    1.13
-Release:    7
+Release:    8
 Group:      Multimedia/openal-soft
-License:    LGPLv2+ 
+License:    LGPLv2+
 Source0:    %{name}-%{version}.tar.gz
 BuildRequires: cmake
 BuildRequires: pkgconfig(avsysaudio)
@@ -34,12 +34,12 @@ OpenAL library software implementation development package
 %build
 
 %ifarch %arm
-export CFLAGS+=" -DARM_ARCH -O3 -ftree-vectorize -ffast-math -fsingle-precision-constant -DUSE_DLOG "
+export CFLAGS+=" -DARM_ARCH -O3 -ftree-vectorize -ffast-math -fsingle-precision-constant -DUSE_DLOG -DUSE_ASM_IN_AL"
 %else
-export CFLAGS+=" -DI386_ARCH "
+export CFLAGS+=" -DI386_ARCH -DUSE_ASM_IN_AL"
 %endif
 
-cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
+%cmake
 make %{?jobs:-j%jobs}
 
 %install

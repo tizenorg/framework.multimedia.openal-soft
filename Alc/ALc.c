@@ -647,7 +647,7 @@ void al_print(const char *fname, unsigned int line, const char *fmt, ...)
     }
     str[sizeof(str)-1] = 0;
 #if defined(USE_DLOG)
-    SLOG(LOG_WARN, "MMFW_OPENAL", "%s", str);
+    SLOG(LOG_WARN, "MM_OPENAL", "%s", str);
 #else
     fprintf(LogFile, "%s", str);
 #endif
