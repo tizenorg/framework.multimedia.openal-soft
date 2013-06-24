@@ -1,7 +1,7 @@
 Name:       openal-soft
 Summary:    OpenAL library software implementation
 Version:    1.13
-Release:    6
+Release:    7
 Group:      Multimedia/openal-soft
 License:    LGPLv2+ 
 Source0:    %{name}-%{version}.tar.gz
@@ -39,7 +39,7 @@ export CFLAGS+=" -DARM_ARCH -O3 -ftree-vectorize -ffast-math -fsingle-precision-
 export CFLAGS+=" -DI386_ARCH "
 %endif
 
-%cmake .
+cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
 make %{?jobs:-j%jobs}
 
 %install

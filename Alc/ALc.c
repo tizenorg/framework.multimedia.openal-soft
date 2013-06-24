@@ -259,6 +259,10 @@ static const ALCfunction alcFunctions[] = {
     { "alMapDatabufferEXT",         (ALCvoid *) alMapDatabufferEXT       },
     { "alUnmapDatabufferEXT",       (ALCvoid *) alUnmapDatabufferEXT     },
 #endif
+#ifdef HAVE_AVSYSTEM
+    { "alcDeviceSuspendEXT",       (ALCvoid *) alcDeviceSuspend_avsystem },
+    { "alcDeviceResumeEXT",       (ALCvoid *) alcDeviceResume_avsystem   },
+#endif
     { NULL,                         (ALCvoid *) NULL                     }
 };
 

@@ -299,6 +299,8 @@ void alc_null_probe(int type);
 void alc_avsystem_init(BackendFuncs *func_list);
 void alc_avsystem_deinit(void);
 void alc_avsystem_probe(int type);
+ALCboolean alcDeviceSuspend_avsystem(ALCdevice* dev);
+ALCboolean alcDeviceResume_avsystem(ALCdevice* dev);
 
 
 typedef struct UIntMap {

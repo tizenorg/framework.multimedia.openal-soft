@@ -82,6 +82,8 @@ asm_callback(int handle, ASM_event_sources_t event_src, ASM_sound_commands_t com
 {
 	avsys_data 		*data = (avsys_data*) cb_data;
 	ASM_cb_result_t	cb_res = ASM_CB_RES_IGNORE;
+	func_in();
+
 	if(!data)
 	{
 		AL_PRINT("asm_callback data is null\n");
@@ -107,6 +109,7 @@ asm_callback(int handle, ASM_event_sources_t event_src, ASM_sound_commands_t com
 		cb_res = ASM_CB_RES_PLAYING;
 		break;
 	}
+	func_out();
 	return cb_res;
 }
 
@@ -154,6 +157,7 @@ static ALuint AvsysProc(ALvoid *ptr)
 			{
 				lenByte =0;
 				aluHandleDisconnect(pDevice);
+				AL_PRINT("aluHandleDisconnect %d\n", data->handle);
 			}
 			lenByte -= wrote;
 			WritePtr += wrote;
@@ -229,6 +233,8 @@ static ALCboolean avsystem_open_playback(ALCdevice *device, const ALCchar *devic
     }
     data->data_size = BufferSize;
     device->ExtraData = data;
+
+	AL_PRINT("avsystem openplayback:%x %x %d %d %d\n", device, data, data->killNow, device->Connected, data->handle);
 
     func_out();
     return ALC_TRUE;
@@ -323,15 +329,17 @@ static ALCboolean avsystem_reset_playback(ALCdevice *device)
 	return ALC_FALSE;
     }
 
+	AL_PRINT("avsystem register_sound:%x %x %d %d %d\n", device, data, data->killNow, device->Connected, data->handle);
+
     data->thread = StartThread(AvsysProc, device);
     if(data->thread == NULL)
     {
     	AL_PRINT("Could not create playback thread\n");
-    	if(!ASM_unregister_sound(data->asm_handle, asm_event, &errorcode))
+		if(!ASM_unregister_sound(data->asm_handle, asm_event, &errorcode))
     	{
-    		AL_PRINT("ASM_unregister_sound() failed 0x%x\n", errorcode);
-    		return ALC_FALSE;
-    	}
+			AL_PRINT("ASM_unregister_sound() failed 0x%x\n", errorcode);
+			return ALC_FALSE;
+		}
     	return ALC_FALSE;
     }
     func_out();
@@ -371,6 +379,7 @@ static void avsystem_close_playback(ALCdevice *device)
 
 	func_in();
 
+	avsys_audio_drain(data->handle);
 	avsys_audio_close(data->handle);
 
 	free(data);
@@ -460,5 +469,95 @@ void alc_avsystem_probe(int type)
         AppendAllDeviceList(avsystem_Device);
     else if(type == CAPTURE_DEVICE_PROBE)
         AppendCaptureDeviceList(avsystem_Device);
+
+}
+
+ALCboolean alcDeviceSuspend_avsystem(ALCdevice *device)
+{
+	int errorcode;
+
+	func_in();
+
+	if (device == NULL)
+		return ALC_FALSE;
+
+	avsys_data *data = (avsys_data*)device->ExtraData;
+	if (data == NULL)
+		return ALC_FALSE;
+
+	AL_PRINT("avsys: %x %x %d %d %d\n", device, data, data->thread, data->mix_data, data->handle);
+
+    if(data->thread)
+    {
+        data->killNow = 1;
+        StopThread(data->thread);
+        AL_PRINT("Thread Stopped\n");
+        data->thread = NULL;
+    }
+
+    if (data->mix_data)
+    {
+		free(data->mix_data);
+		data->mix_data = NULL;
+    }
+
+    AL_PRINT("asm_event:%d %d %d\n", data->asm_event, data->asm_handle, data->handle);
+
+    if (data->handle>=0) {
+		avsys_audio_drain(data->handle);
+		avsys_audio_close(data->handle);
+		AL_PRINT("avsys_audio_close:%d", data->handle);
+		data->handle = NULL;
+    }
+
+    if(data->asm_event != ASM_EVENT_CALL)
+    {
+		if(!ASM_unregister_sound(data->asm_handle, data->asm_event, &errorcode))
+		{
+			AL_PRINT("ASM_unregister failed in alcDeviceSuspend_avsystem with 0x%x\n", errorcode);
+		}
+	}
+
+    func_out();
+
+    return ALC_TRUE;
+}
+
+ALCboolean alcDeviceResume_avsystem(ALCdevice *device)
+{
+	ALCboolean ret = ALC_TRUE;
+	int BufferSize = 0;
+
+	func_in();
+	if (device == NULL) {
+		AL_PRINT("alc_device_resume_avsystem() failed:device is null\n");
+		return ALC_FALSE;
+	}
+
+	avsys_data *data = (avsys_data*)device->ExtraData;
+	if (data == NULL) {
+		AL_PRINT("alc_device_resume_avsystem() failed:data is null\n");
+		return ALC_FALSE;
+	}
+
+    if(AVSYS_STATE_SUCCESS !=
+					avsys_audio_open(&data->param, &data->handle, &BufferSize))
+    {
+		AL_PRINT("avsys_audio_open() failed\n");
+		return ALC_FALSE;
+    }
+    data->data_size = BufferSize;
+    data->killNow = 0;
+
+    ret = avsystem_reset_playback(device);
+    if (ret == ALC_FALSE)
+    {
+		AL_PRINT("avsystem_reset_playback() failed\n");
+		return ALC_FALSE;
+    }
+
+    func_out();
+
+    return ALC_TRUE;
 
 }
