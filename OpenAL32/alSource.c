@@ -1509,6 +1509,10 @@ AL_API ALvoid AL_APIENTRY alSourcePlayv(ALsizei n, const ALuint *sources)
     Context = GetContextSuspended();
     if(!Context) return;
 
+#ifdef USE_ASM_IN_AL
+    Context->LastError = AL_NO_ERROR;
+#endif
+
     if(n < 0)
     {
         alSetError(Context, AL_INVALID_VALUE);
