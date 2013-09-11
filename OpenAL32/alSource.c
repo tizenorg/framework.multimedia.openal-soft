@@ -31,6 +31,11 @@
 #include "alBuffer.h"
 #include "alThunk.h"
 #include "alAuxEffectSlot.h"
+#ifdef USE_ASM_IN_AL
+#include <audio-session-manager.h>
+#include <mm_session.h>
+#include <mm_session_private.h>
+#endif
 
 
 resampler_t DefaultResampler;
@@ -262,15 +267,6 @@ AL_API ALvoid AL_APIENTRY alGenSources(ALsizei n,ALuint *sources)
         ASM_event = ASM_EVENT_SHARE_OPENAL;
         break;
     }
-
-    Context->ASM_handle = -1;
-    Context->ASM_event = ASM_event;
-    if(!ASM_register_sound(-1, &Context->ASM_handle, ASM_event, ASM_STATE_NONE, asm_callback, NULL, ASM_RESOURCE_NONE, &errorcode))
-    {
-        alSetError(Context, AL_INVALID_OPERATION);
-        AL_PRINT("failed to ASM_register_sound(), ASM_event(%d)", ASM_event);
-        return;
-    }
 #endif
 
     Device = Context->Device;
@@ -294,6 +290,17 @@ AL_API ALvoid AL_APIENTRY alGenSources(ALsizei n,ALuint *sources)
                 alDeleteSources(i, sources);
                 break;
             }
+#ifdef USE_ASM_IN_AL
+            source->ASM_handle = -1;
+            source->ASM_event = ASM_event;
+            if(!ASM_register_sound(-1, &source->ASM_handle, ASM_event, ASM_STATE_NONE, asm_callback, NULL, ASM_RESOURCE_NONE, &errorcode))
+            {
+                alSetError(Context, AL_INVALID_OPERATION);
+                AL_PRINT("failed to ASM_register_sound(), ASM_event(%d)", ASM_event);
+                alDeleteSources(i, sources);
+                break;
+            }
+#endif
 
             source->source = (ALuint)ALTHUNK_ADDENTRY(source);
             err = InsertUIntMapEntry(&Context->SourceMap, source->source,
@@ -397,21 +404,26 @@ AL_API ALvoid AL_APIENTRY alDeleteSources(ALsizei n, const ALuint *sources)
             RemoveUIntMapKey(&Context->SourceMap, Source->source);
             ALTHUNK_REMOVEENTRY(Source->source);
 
+#ifdef USE_ASM_IN_AL
+            if(Source->ASM_handle != -1)
+            {
+                if(!ASM_unregister_sound(Source->ASM_handle, Source->ASM_event, &errorcode))
+                {
+                    alSetError(Context, AL_INVALID_OPERATION);
+                    AL_PRINT("failed to ASM_unregister_sound(), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
+                }
+                else
+                {
+                    Source->ASM_handle = -1;
+                    Source->ASM_event = ASM_EVENT_NONE;
+                }
+            }
+#endif
             memset(Source,0,sizeof(ALsource));
             free(Source);
         }
     }
 
-#ifdef USE_ASM_IN_AL
-    if(Context->ASM_handle != -1)
-    {
-        if(!ASM_unregister_sound(Context->ASM_handle, Context->ASM_event, &errorcode))
-        {
-            alSetError(Context, AL_INVALID_OPERATION);
-            AL_PRINT("failed to ASM_unregister_sound(), ASM_handle(%d), ASM_event(%d)", Context->ASM_handle, Context->ASM_event);
-        }
-    }
-#endif
     ProcessContext(Context);
 }
 
@@ -1524,14 +1536,6 @@ AL_API ALvoid AL_APIENTRY alSourcePlayv(ALsizei n, const ALuint *sources)
         goto done;
     }
 
-#ifdef USE_ASM_IN_AL
-    if(!ASM_set_sound_state(Context->ASM_handle, Context->ASM_event, ASM_STATE_PLAYING, ASM_RESOURCE_NONE, &errorcode))
-    {
-        alSetError(Context, AL_INVALID_OPERATION);
-        AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_PLAYING), ASM_handle(%d), ASM_event(%d)", Context->ASM_handle, Context->ASM_event);
-        goto done;
-    }
-#endif
     // Check that all the Sources are valid
     for(i = 0;i < n;i++)
     {
@@ -1540,6 +1544,15 @@ AL_API ALvoid AL_APIENTRY alSourcePlayv(ALsizei n, const ALuint *sources)
             alSetError(Context, AL_INVALID_NAME);
             goto done;
         }
+#ifdef USE_ASM_IN_AL
+        Source = (ALsource*)ALTHUNK_LOOKUPENTRY(sources[i]);
+        if(!ASM_set_sound_state(Source->ASM_handle, Source->ASM_event, ASM_STATE_PLAYING, ASM_RESOURCE_NONE, &errorcode))
+        {
+            alSetError(Context, AL_INVALID_OPERATION);
+            AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_PLAYING), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
+            goto done;
+        }
+#endif
     }
 
     while(Context->MaxActiveSources-Context->ActiveSourceCount < n)
@@ -1667,19 +1680,19 @@ AL_API ALvoid AL_APIENTRY alSourcePausev(ALsizei n, const ALuint *sources)
         Source = (ALsource*)ALTHUNK_LOOKUPENTRY(sources[i]);
         if(Source->state == AL_PLAYING)
             Source->state = AL_PAUSED;
+#ifdef USE_ASM_IN_AL
+        if (Context->LastError == AL_NO_ERROR && Source->ASM_handle != -1)
+        {
+            if(!ASM_set_sound_state(Source->ASM_handle, Source->ASM_event, ASM_STATE_PAUSE, ASM_RESOURCE_NONE, &errorcode))
+            {
+                alSetError(Context, AL_INVALID_OPERATION);
+                AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_PAUSE), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
+            }
+        }
+#endif
     }
 
 done:
-#ifdef USE_ASM_IN_AL
-    if (Context->LastError == AL_NO_ERROR)
-    {
-        if(!ASM_set_sound_state(Context->ASM_handle, Context->ASM_event, ASM_STATE_PAUSE, ASM_RESOURCE_NONE, &errorcode))
-        {
-            alSetError(Context, AL_INVALID_OPERATION);
-            AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_PAUSE), ASM_handle(%d), ASM_event(%d)", Context->ASM_handle, Context->ASM_event);
-        }
-    }
-#endif
     ProcessContext(Context);
 }
 
@@ -1730,19 +1743,19 @@ AL_API ALvoid AL_APIENTRY alSourceStopv(ALsizei n, const ALuint *sources)
             Source->BuffersPlayed = Source->BuffersInQueue;
         }
         Source->lOffset = 0;
+#ifdef USE_ASM_IN_AL
+        if (Context->LastError == AL_NO_ERROR && Source->ASM_handle != -1)
+        {
+            if(!ASM_set_sound_state(Source->ASM_handle, Source->ASM_event, ASM_STATE_STOP, ASM_RESOURCE_NONE, &errorcode))
+            {
+                alSetError(Context, AL_INVALID_OPERATION);
+                AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_STOP), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
+            }
+        }
+#endif
     }
 
 done:
-#ifdef USE_ASM_IN_AL
-    if (Context->LastError == AL_NO_ERROR)
-    {
-        if(!ASM_set_sound_state(Context->ASM_handle, Context->ASM_event, ASM_STATE_STOP, ASM_RESOURCE_NONE, &errorcode))
-        {
-            alSetError(Context, AL_INVALID_OPERATION);
-            AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_STOP), ASM_handle(%d), ASM_event(%d)", Context->ASM_handle, Context->ASM_event);
-        }
-    }
-#endif
     ProcessContext(Context);
 }
 

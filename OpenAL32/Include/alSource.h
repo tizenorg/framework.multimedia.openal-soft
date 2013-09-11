@@ -7,6 +7,10 @@
 #include "alu.h"
 #include "AL/al.h"
 
+#ifdef USE_ASM_IN_AL
+#include <audio-session-manager.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -109,6 +113,11 @@ typedef struct ALsource
 
     // Index to itself
     ALuint source;
+
+#ifdef USE_ASM_IN_AL
+    int         ASM_handle;
+    ASM_sound_events_t     ASM_event;
+#endif
 } ALsource;
 #define ALsource_Update(s,a)  ((s)->Update(s,a))
 
