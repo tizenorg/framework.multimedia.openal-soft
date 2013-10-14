@@ -1,7 +1,7 @@
 Name:       openal-soft
 Summary:    OpenAL library software implementation
 Version:    1.13
-Release:    10
+Release:    11
 Group:      Multimedia/openal-soft
 License:    LGPLv2+
 Source0:    %{name}-%{version}.tar.gz
@@ -44,6 +44,8 @@ make %{?jobs:-j%jobs}
 
 %install
 rm -rf %{buildroot}
+mkdir -p %{buildroot}/usr/share/license
+cp COPYING %{buildroot}/usr/share/license/%{name}
 %make_install
 
 
@@ -58,6 +60,7 @@ rm -rf %{buildroot}
 %{_libdir}/*.so*
 %{_bindir}/*
 /etc/openal/alsoft.conf
+%{_datadir}/license/%{name}
 
 %files devel
 %{_includedir}/*
