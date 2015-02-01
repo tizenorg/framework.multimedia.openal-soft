@@ -76,10 +76,6 @@ static BackendInfo BackendList[] = {
 #ifdef HAVE_WAVE
     { "wave", alc_wave_init, alc_wave_deinit, alc_wave_probe, EmptyFuncs },
 #endif
-#ifdef HAVE_AVSYSTEM
-   { "avsystem", alc_avsystem_init, alc_avsystem_deinit, alc_avsystem_probe, EmptyFuncs },
-#endif
-
     { NULL, NULL, NULL, NULL, EmptyFuncs }
 };
 #undef EmptyFuncs
@@ -258,10 +254,6 @@ static const ALCfunction alcFunctions[] = {
     { "alSelectDatabufferEXT",      (ALCvoid *) alSelectDatabufferEXT    },
     { "alMapDatabufferEXT",         (ALCvoid *) alMapDatabufferEXT       },
     { "alUnmapDatabufferEXT",       (ALCvoid *) alUnmapDatabufferEXT     },
-#endif
-#ifdef HAVE_AVSYSTEM
-    { "alcDeviceSuspendEXT",       (ALCvoid *) alcDeviceSuspend_avsystem },
-    { "alcDeviceResumeEXT",       (ALCvoid *) alcDeviceResume_avsystem   },
 #endif
     { NULL,                         (ALCvoid *) NULL                     }
 };

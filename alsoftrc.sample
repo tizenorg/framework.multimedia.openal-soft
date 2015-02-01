@@ -124,7 +124,7 @@ sources = 32
 #  followed by all other available backends, while 'oss' will list OSS only).
 #  An empty list means the default.
 #drivers = pulse,alsa,oss,solaris,dsound,winmm,port,wave
-drivers = avsystem
+drivers = pulse
 
 ## excludefx:
 #  Sets which effects to exclude, preventing apps from using them. This can
@@ -255,6 +255,3 @@ excludefx = eaxreverb,reverb,echo
 #  backend from opening, even when explicitly requested.
 #  THIS WILL OVERWRITE EXISTING FILES WITHOUT QUESTION!
 #file =
-
-[avsystem]
-device = avsystem_playback

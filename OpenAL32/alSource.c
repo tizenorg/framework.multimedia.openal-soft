@@ -31,11 +31,6 @@
 #include "alBuffer.h"
 #include "alThunk.h"
 #include "alAuxEffectSlot.h"
-#ifdef USE_ASM_IN_AL
-#include <audio-session-manager.h>
-#include <mm_session.h>
-#include <mm_session_private.h>
-#endif
 
 
 resampler_t DefaultResampler;
@@ -62,212 +57,15 @@ static ALint GetByteOffset(ALsource *Source);
 #define LookupEffectSlot(m, k) ((ALeffectslot*)LookupUIntMapKey(&(m), (k)))
 
 
-#ifdef USE_ASM_IN_AL
-ASM_cb_result_t asm_callback(int handle, ASM_event_sources_t event_src, ASM_sound_commands_t command, unsigned int sound_status, void* cb_data)
-{
-    ALCcontext *Context;
-    ASM_cb_result_t cb_res = ASM_CB_RES_IGNORE;
-    int i = 0;
-    int n = 0;
-    ALuint *Sources;
-    ALsource *Source;
-    func_in();
-
-    Context = GetContextSuspended();
-    if(!Context) return cb_res;
-
-    n = Context->NumOfSources;
-    if(n < 0)
-    {
-        alSetError(Context, AL_INVALID_VALUE);
-        goto done;
-    }
-    Sources = Context->Sources;
-    if(n > 0 && !Sources)
-    {
-        alSetError(Context, AL_INVALID_VALUE);
-        goto done;
-    }
-
-    // Check all the Sources are valid
-    for(i = 0;i < n;i++)
-    {
-        if(!LookupSource(Context->SourceMap, Sources[i]))
-        {
-            alSetError(Context, AL_INVALID_NAME);
-            goto done;
-        }
-    }
-
-    AL_PRINT("ASM command(%d), (0:NONE/2:PLAY/3:STOP/4:PAUSE/5:RESUME)", command);
-    switch(command)
-    {
-    case ASM_COMMAND_STOP:
-    case ASM_COMMAND_PAUSE:
-    {
-        for(i = 0;i < n;i++)
-        {
-            Source = (ALsource*)ALTHUNK_LOOKUPENTRY(Sources[i]);
-            if(Source->state == AL_PLAYING)
-                Source->state = AL_PAUSED;
-        }
-    }
-        cb_res = ASM_CB_RES_STOP;
-        break;
-    case ASM_COMMAND_PLAY:
-    case ASM_COMMAND_RESUME:
-    {
-        ALbufferlistitem *BufferList;
-        int j = 0;
-
-        while(Context->MaxActiveSources-Context->ActiveSourceCount < n)
-        {
-            void *temp = NULL;
-            ALsizei newcount;
-
-            newcount = Context->MaxActiveSources << 1;
-            if(newcount > 0)
-                temp = realloc(Context->ActiveSources,
-                               sizeof(*Context->ActiveSources) * newcount);
-            if(!temp)
-            {
-                alSetError(Context, AL_OUT_OF_MEMORY);
-                goto done;
-            }
-
-            Context->ActiveSources = temp;
-            Context->MaxActiveSources = newcount;
-        }
-
-        for(i = 0;i < n;i++)
-        {
-            Source = (ALsource*)ALTHUNK_LOOKUPENTRY(Sources[i]);
-
-            // Check that there is a queue containing at least one non-null, non zero length AL Buffer
-            BufferList = Source->queue;
-            while(BufferList)
-            {
-                if(BufferList->buffer != NULL && BufferList->buffer->size)
-                    break;
-                BufferList = BufferList->next;
-            }
-
-            if(!BufferList)
-            {
-                Source->state = AL_STOPPED;
-                Source->BuffersPlayed = Source->BuffersInQueue;
-                Source->position = 0;
-                Source->position_fraction = 0;
-                Source->lOffset = 0;
-                continue;
-            }
-
-            if(Source->state != AL_PAUSED)
-            {
-                Source->state = AL_PLAYING;
-                Source->position = 0;
-                Source->position_fraction = 0;
-                Source->BuffersPlayed = 0;
-
-                Source->Buffer = Source->queue->buffer;
-            }
-            else
-                Source->state = AL_PLAYING;
-
-            // Check if an Offset has been set
-            if(Source->lOffset)
-                ApplyOffset(Source);
-
-            // If device is disconnected, go right to stopped
-            if(!Context->Device->Connected)
-            {
-                Source->state = AL_STOPPED;
-                Source->BuffersPlayed = Source->BuffersInQueue;
-                Source->position = 0;
-                Source->position_fraction = 0;
-            }
-            else
-            {
-                for(j = 0;j < Context->ActiveSourceCount;j++)
-                {
-                    if(Context->ActiveSources[j] == Source)
-                        break;
-                }
-                if(j == Context->ActiveSourceCount)
-                    Context->ActiveSources[Context->ActiveSourceCount++] = Source;
-            }
-        }
-    }
-        cb_res = ASM_CB_RES_PLAYING;
-        break;
-    default:
-        AL_PRINT("do anything for ASM_COMMAND_NONE");
-        break;
-    }
-
-done:
-    ProcessContext(Context);
-    func_out();
-    return cb_res;
-}
-#endif
 
 
 AL_API ALvoid AL_APIENTRY alGenSources(ALsizei n,ALuint *sources)
 {
     ALCcontext *Context;
     ALCdevice *Device;
-#ifdef USE_ASM_IN_AL
-    int sessionType = MM_SESSION_TYPE_SHARE;
-    ASM_sound_events_t ASM_event = ASM_EVENT_NONE;
-    int errorcode = 0;
-#endif
 
     Context = GetContextSuspended();
     if(!Context) return;
-
-#ifdef USE_ASM_IN_AL
-    /* read session type */
-    if(_mm_session_util_read_type(-1, &sessionType) < 0)
-    {
-        sessionType = MM_SESSION_TYPE_SHARE;
-        if(mm_session_init(sessionType) < 0)
-        {
-            alSetError(Context, AL_INVALID_OPERATION);
-            AL_PRINT("failed to mm_session_init(), sessionType(%d)", sessionType);
-            return;
-        }
-    }
-    /* convert MM_SESSION_TYPE to ASM_EVENT_TYPE */
-    switch(sessionType)
-    {
-    case MM_SESSION_TYPE_SHARE:
-        ASM_event = ASM_EVENT_SHARE_OPENAL;
-        break;
-    case MM_SESSION_TYPE_EXCLUSIVE:
-        ASM_event = ASM_EVENT_EXCLUSIVE_OPENAL;
-        break;
-    case MM_SESSION_TYPE_NOTIFY:
-        ASM_event = ASM_EVENT_NOTIFY;
-        break;
-    case MM_SESSION_TYPE_ALARM:
-        ASM_event = ASM_EVENT_ALARM;
-        break;
-    case MM_SESSION_TYPE_EMERGENCY:
-        ASM_event = ASM_EVENT_EMERGENCY;
-        break;
-    case MM_SESSION_TYPE_CALL:
-        ASM_event = ASM_EVENT_CALL;
-        break;
-    case MM_SESSION_TYPE_VIDEOCALL:
-        ASM_event = ASM_EVENT_VIDEOCALL;
-        break;
-    default:
-        AL_PRINT("unexpected sessionType(%d)!",sessionType);
-        ASM_event = ASM_EVENT_SHARE_OPENAL;
-        break;
-    }
-#endif
 
     Device = Context->Device;
     if(n < 0 || IsBadWritePtr((void*)sources, n * sizeof(ALuint)))
@@ -290,17 +88,6 @@ AL_API ALvoid AL_APIENTRY alGenSources(ALsizei n,ALuint *sources)
                 alDeleteSources(i, sources);
                 break;
             }
-#ifdef USE_ASM_IN_AL
-            source->ASM_handle = -1;
-            source->ASM_event = ASM_event;
-            if(!ASM_register_sound(-1, &source->ASM_handle, ASM_event, ASM_STATE_NONE, asm_callback, NULL, ASM_RESOURCE_NONE, &errorcode))
-            {
-                alSetError(Context, AL_INVALID_OPERATION);
-                AL_PRINT("failed to ASM_register_sound(), ASM_event(%d)", ASM_event);
-                alDeleteSources(i, sources);
-                break;
-            }
-#endif
 
             source->source = (ALuint)ALTHUNK_ADDENTRY(source);
             err = InsertUIntMapEntry(&Context->SourceMap, source->source,
@@ -321,13 +108,6 @@ AL_API ALvoid AL_APIENTRY alGenSources(ALsizei n,ALuint *sources)
         }
     }
 
-#ifdef USE_ASM_IN_AL
-    if(Context->LastError == AL_NO_ERROR)
-    {
-        Context->Sources = sources;
-        Context->NumOfSources = n;
-    }
-#endif
     ProcessContext(Context);
 }
 
@@ -339,9 +119,6 @@ AL_API ALvoid AL_APIENTRY alDeleteSources(ALsizei n, const ALuint *sources)
     ALsizei i, j;
     ALbufferlistitem *BufferList;
     ALboolean SourcesValid = AL_FALSE;
-#ifdef USE_ASM_IN_AL
-    int errorcode = 0;
-#endif
 
     Context = GetContextSuspended();
     if(!Context) return;
@@ -404,21 +181,6 @@ AL_API ALvoid AL_APIENTRY alDeleteSources(ALsizei n, const ALuint *sources)
             RemoveUIntMapKey(&Context->SourceMap, Source->source);
             ALTHUNK_REMOVEENTRY(Source->source);
 
-#ifdef USE_ASM_IN_AL
-            if(Source->ASM_handle != -1)
-            {
-                if(!ASM_unregister_sound(Source->ASM_handle, Source->ASM_event, &errorcode))
-                {
-                    alSetError(Context, AL_INVALID_OPERATION);
-                    AL_PRINT("failed to ASM_unregister_sound(), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
-                }
-                else
-                {
-                    Source->ASM_handle = -1;
-                    Source->ASM_event = ASM_EVENT_NONE;
-                }
-            }
-#endif
             memset(Source,0,sizeof(ALsource));
             free(Source);
         }
@@ -1514,16 +1276,9 @@ AL_API ALvoid AL_APIENTRY alSourcePlayv(ALsizei n, const ALuint *sources)
     ALsource         *Source;
     ALbufferlistitem *BufferList;
     ALsizei          i, j;
-#ifdef USE_ASM_IN_AL
-    int errorcode = 0;
-#endif
 
     Context = GetContextSuspended();
     if(!Context) return;
-
-#ifdef USE_ASM_IN_AL
-    Context->LastError = AL_NO_ERROR;
-#endif
 
     if(n < 0)
     {
@@ -1544,15 +1299,6 @@ AL_API ALvoid AL_APIENTRY alSourcePlayv(ALsizei n, const ALuint *sources)
             alSetError(Context, AL_INVALID_NAME);
             goto done;
         }
-#ifdef USE_ASM_IN_AL
-        Source = (ALsource*)ALTHUNK_LOOKUPENTRY(sources[i]);
-        if(!ASM_set_sound_state(Source->ASM_handle, Source->ASM_event, ASM_STATE_PLAYING, ASM_RESOURCE_NONE, &errorcode))
-        {
-            alSetError(Context, AL_INVALID_OPERATION);
-            AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_PLAYING), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
-            goto done;
-        }
-#endif
     }
 
     while(Context->MaxActiveSources-Context->ActiveSourceCount < n)
@@ -1647,9 +1393,6 @@ AL_API ALvoid AL_APIENTRY alSourcePausev(ALsizei n, const ALuint *sources)
     ALCcontext *Context;
     ALsource *Source;
     ALsizei i;
-#ifdef USE_ASM_IN_AL
-    int errorcode = 0;
-#endif
 
     Context = GetContextSuspended();
     if(!Context) return;
@@ -1680,16 +1423,6 @@ AL_API ALvoid AL_APIENTRY alSourcePausev(ALsizei n, const ALuint *sources)
         Source = (ALsource*)ALTHUNK_LOOKUPENTRY(sources[i]);
         if(Source->state == AL_PLAYING)
             Source->state = AL_PAUSED;
-#ifdef USE_ASM_IN_AL
-        if (Context->LastError == AL_NO_ERROR && Source->ASM_handle != -1)
-        {
-            if(!ASM_set_sound_state(Source->ASM_handle, Source->ASM_event, ASM_STATE_PAUSE, ASM_RESOURCE_NONE, &errorcode))
-            {
-                alSetError(Context, AL_INVALID_OPERATION);
-                AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_PAUSE), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
-            }
-        }
-#endif
     }
 
 done:
@@ -1706,9 +1439,6 @@ AL_API ALvoid AL_APIENTRY alSourceStopv(ALsizei n, const ALuint *sources)
     ALCcontext *Context;
     ALsource *Source;
     ALsizei i;
-#ifdef USE_ASM_IN_AL
-    int errorcode = 0;
-#endif
 
     Context = GetContextSuspended();
     if(!Context) return;
@@ -1743,16 +1473,6 @@ AL_API ALvoid AL_APIENTRY alSourceStopv(ALsizei n, const ALuint *sources)
             Source->BuffersPlayed = Source->BuffersInQueue;
         }
         Source->lOffset = 0;
-#ifdef USE_ASM_IN_AL
-        if (Context->LastError == AL_NO_ERROR && Source->ASM_handle != -1)
-        {
-            if(!ASM_set_sound_state(Source->ASM_handle, Source->ASM_event, ASM_STATE_STOP, ASM_RESOURCE_NONE, &errorcode))
-            {
-                alSetError(Context, AL_INVALID_OPERATION);
-                AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_STOP), ASM_handle(%d), ASM_event(%d)", Source->ASM_handle, Source->ASM_event);
-            }
-        }
-#endif
     }
 
 done:

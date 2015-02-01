@@ -13,12 +13,6 @@
 #include "AL/alc.h"
 #include "AL/alext.h"
 
-#include <dlog.h>
-#define LOG_TAG	"MM_OPENAL"
-#define func_in() SLOG(LOG_VERBOSE, LOG_TAG, "<< %s\n", __FUNCTION__)
-#define func_out() SLOG(LOG_VERBOSE, LOG_TAG, ">> %s\n", __FUNCTION__)
-
-
 #ifndef AL_EXT_sample_buffer_object
 #define AL_EXT_sample_buffer_object 1
 typedef ptrdiff_t ALintptrEXT;
@@ -301,14 +295,6 @@ void alc_null_init(BackendFuncs *func_list);
 void alc_null_deinit(void);
 void alc_null_probe(int type);
 
-/*- * avsystem porting- */
-void alc_avsystem_init(BackendFuncs *func_list);
-void alc_avsystem_deinit(void);
-void alc_avsystem_probe(int type);
-ALCboolean alcDeviceSuspend_avsystem(ALCdevice* dev);
-ALCboolean alcDeviceResume_avsystem(ALCdevice* dev);
-
-
 typedef struct UIntMap {
     struct {
         ALuint key;
@@ -443,10 +429,6 @@ struct ALCcontext_struct
 
     ALenum      LastError;
 
-#ifdef USE_ASM_IN_AL
-    ALuint *Sources;
-    ALsizei NumOfSources;
-#endif
     ALboolean   Suspended;
 
     ALenum      DistanceModel;
