@@ -56,6 +56,9 @@ static ALint GetByteOffset(ALsource *Source);
 #define LookupFilter(m, k) ((ALfilter*)LookupUIntMapKey(&(m), (k)))
 #define LookupEffectSlot(m, k) ((ALeffectslot*)LookupUIntMapKey(&(m), (k)))
 
+
+
+
 AL_API ALvoid AL_APIENTRY alGenSources(ALsizei n,ALuint *sources)
 {
     ALCcontext *Context;

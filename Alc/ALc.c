@@ -76,10 +76,6 @@ static BackendInfo BackendList[] = {
 #ifdef HAVE_WAVE
     { "wave", alc_wave_init, alc_wave_deinit, alc_wave_probe, EmptyFuncs },
 #endif
-#ifdef HAVE_AVSYSTEM
-   { "avsystem", alc_avsystem_init, alc_avsystem_deinit, alc_avsystem_probe, EmptyFuncs },
-#endif
-
     { NULL, NULL, NULL, NULL, EmptyFuncs }
 };
 #undef EmptyFuncs
@@ -643,7 +639,7 @@ void al_print(const char *fname, unsigned int line, const char *fmt, ...)
     }
     str[sizeof(str)-1] = 0;
 #if defined(USE_DLOG)
-    SLOG(LOG_WARN, "MMFW_OPENAL", "%s", str);
+    SLOG(LOG_WARN, "MM_OPENAL", "%s", str);
 #else
     fprintf(LogFile, "%s", str);
 #endif

@@ -295,12 +295,6 @@ void alc_null_init(BackendFuncs *func_list);
 void alc_null_deinit(void);
 void alc_null_probe(int type);
 
-/*- * avsystem porting- */
-void alc_avsystem_init(BackendFuncs *func_list);
-void alc_avsystem_deinit(void);
-void alc_avsystem_probe(int type);
-
-
 typedef struct UIntMap {
     struct {
         ALuint key;

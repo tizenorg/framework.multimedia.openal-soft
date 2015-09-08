@@ -28,9 +28,6 @@
 /* Define if we have the Wave Writer backend */
 #cmakedefine HAVE_WAVE
 
-/* Define if we have the AVSYSTEM backend */
-#cmakedefine HAVE_AVSYSTEM
-
 /* Define if we have dlfcn.h */
 #cmakedefine HAVE_DLFCN_H
 

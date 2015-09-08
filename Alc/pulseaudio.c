@@ -28,6 +28,13 @@
 
 #include <pulse/pulseaudio.h>
 
+#ifdef USE_ASM_IN_PULSEAUDIO
+#include <audio-session-manager.h>
+#include <mm_session.h>
+#include <mm_error.h>
+
+#endif
+
 #if PA_API_VERSION == 11
 #define PA_STREAM_ADJUST_LATENCY 0x2000U
 #define PA_STREAM_EARLY_REQUESTS 0x4000U
@@ -143,6 +150,11 @@ typedef struct {
 
     pa_stream *stream;
     pa_context *context;
+#ifdef USE_ASM_IN_PULSEAUDIO
+    int asm_handle;
+    ASM_sound_events_t asm_event;
+    int is_mute;
+#endif
 } pulse_data;
 
 typedef struct {
@@ -543,7 +555,7 @@ static ALuint PulseProc(ALvoid *param)
             continue;
         }
 
-        while(len > 0)
+        while(len > 0 && !data->is_mute)
         {
             size_t newlen = len;
             void *buf;
@@ -560,14 +572,12 @@ static ALuint PulseProc(ALvoid *param)
             ppa_threaded_mainloop_unlock(data->loop);
 
             aluMixData(Device, buf, newlen/data->frame_size);
-
             ppa_threaded_mainloop_lock(data->loop);
             ppa_stream_write(data->stream, buf, newlen, free_func, 0, PA_SEEK_RELATIVE);
             len -= newlen;
         }
     } while(Device->Connected && !data->killNow);
     ppa_threaded_mainloop_unlock(data->loop);
-
     return 0;
 }
 
@@ -784,11 +794,84 @@ static void pulse_close(ALCdevice *device) //{{{
 //}}}
 
 // OpenAL {{{
+
+ASM_cb_result_t asm_callback(int handle, ASM_event_sources_t event_src, ASM_sound_commands_t command, unsigned int sound_status, void* cb_data)
+{
+    ASM_cb_result_t result = ASM_CB_RES_NONE;
+    pulse_data *data = (pulse_data *)cb_data;
+
+    AL_PRINT("eventsrc[%d], command[%d], sound_status[%d], cb_data[%x]", event_src, command, sound_status, cb_data);
+
+    switch(command) {
+    case ASM_COMMAND_RESUME:
+        result = ASM_CB_RES_PLAYING;
+        /* unmute */
+        data->is_mute = 0;
+        AL_PRINT("do un-mute due to event_src[%d]", event_src);
+        break;
+    case ASM_COMMAND_PAUSE:
+    case ASM_COMMAND_STOP:
+        /* mute */
+        data->is_mute = 1;
+        AL_PRINT("do mute due to event_src[%d]", event_src);
+        result = ASM_CB_RES_PAUSE;
+        break;
+    default:
+        break;
+    }
+
+    return result;
+}
+
+static int _get_asm_information(ASM_sound_events_t *type, int *options)
+{
+    int cur_session = MM_SESSION_TYPE_MEDIA;
+    int session_options = 0;
+    int ret = MM_ERROR_NONE;
+    ASM_sound_events_t asm_event;
+
+    if(type == NULL)
+        return MM_ERROR_SOUND_INVALID_POINTER;
+
+    /* read session information */
+    if(_mm_session_util_read_information(-1, &cur_session, &session_options) < 0) {
+        AL_PRINT("Read Session Information failed. Set default \"Media\" type\n");
+        cur_session = MM_SESSION_TYPE_MEDIA;
+        ret = _mm_session_util_write_type(-1, cur_session);
+        if (ret) {
+            AL_PRINT("_mm_session_util_write_type() failed\n");
+            return MM_ERROR_SOUND_INTERNAL;
+        }
+    }
+    /* convert MM_SESSION_TYPE to ASM_EVENT_TYPE */
+    switch (cur_session) {
+    case MM_SESSION_TYPE_MEDIA:
+    case MM_SESSION_TYPE_MEDIA_RECORD:
+        asm_event = ASM_EVENT_MEDIA_OPENAL;
+        AL_PRINT("covert MM_SESSION_TYPE to ASM_EVENT_TYPE success!! %d\n", asm_event);
+        break;
+    default:
+        AL_PRINT("Unexpected %d\n", cur_session);
+        return MM_ERROR_POLICY_RESTRICTED;
+    }
+
+    *type = asm_event;
+    *options = session_options;
+    return MM_ERROR_NONE;
+}
+
 static ALCboolean pulse_open_playback(ALCdevice *device, const ALCchar *device_name) //{{{
 {
     char *pulse_name = NULL;
     pa_sample_spec spec;
-    pulse_data *data;
+    pulse_data *data = NULL;
+    int session_options = 0;
+    int errorcode = MM_ERROR_NONE;
+
+    if(pulse_open(device, device_name) == ALC_FALSE)
+        return ALC_FALSE;
+
+    data = device->ExtraData;
 
     if(!pulse_load())
         return ALC_FALSE;
@@ -814,10 +897,27 @@ static ALCboolean pulse_open_playback(ALCdevice *device, const ALCchar *device_n
             return ALC_FALSE;
     }
 
-    if(pulse_open(device, device_name) == ALC_FALSE)
-        return ALC_FALSE;
+#ifdef USE_ASM_IN_PULSEAUDIO
+    /* read session information */
+    errorcode = _get_asm_information(&data->asm_event, &session_options);
+    if (errorcode) {
+        AL_PRINT("_get_asm_information fail");
+        goto fail;
+    }
+    AL_PRINT("get asm info success!!");
+    if(!ASM_register_sound(-1, &data->asm_handle, data->asm_event, ASM_STATE_NONE, asm_callback, data, ASM_RESOURCE_NONE, &errorcode)) {
+        AL_PRINT("failed to ASM_register_sound(), ASM_event(%d), error(%x)\n", data->asm_event, errorcode);
+        goto fail;
+    }
+    AL_PRINT("ASM register sound success!!");
+    if (session_options) {
+        if( !ASM_set_session_option(data->asm_handle, session_options, &errorcode)) {
+            AL_PRINT("ASM_set_session_options() failed, error(%x)\n", errorcode);
+            goto fail;
+        }
+    }
+#endif
 
-    data = device->ExtraData;
 
     ppa_threaded_mainloop_lock(data->loop);
 
@@ -857,7 +957,20 @@ fail:
 
 static void pulse_close_playback(ALCdevice *device) //{{{
 {
+    int errorcode = MM_ERROR_NONE;
+    pulse_data *data = device->ExtraData;
+	
+	
+#ifdef USE_ASM_IN_PULSEAUDIO
+    if (data->asm_handle != -1) {
+        if(!ASM_unregister_sound(data->asm_handle, data->asm_event, &errorcode)) {
+            AL_PRINT("failed to ASM_unregister_sound(), asm_handle(%d), asm_event(%d), error(%x)\n", data->asm_handle, data->asm_event, errorcode);
+        }
+    }
+#endif
+
     pulse_close(device);
+
 } //}}}
 
 static ALCboolean pulse_reset_playback(ALCdevice *device) //{{{
@@ -865,6 +978,7 @@ static ALCboolean pulse_reset_playback(ALCdevice *device) //{{{
     pulse_data *data = device->ExtraData;
     pa_stream_flags_t flags = 0;
     pa_channel_map chanmap;
+    int errorcode = MM_ERROR_NONE;
 
     ppa_threaded_mainloop_lock(data->loop);
 
@@ -925,6 +1039,14 @@ static ALCboolean pulse_reset_playback(ALCdevice *device) //{{{
         return ALC_FALSE;
     }
     SetDefaultWFXChannelOrder(device);
+
+#ifdef USE_ASM_IN_PULSEAUDIO
+	/* ASM set state to PLAYING */
+    if(!ASM_set_sound_state(data->asm_handle, data->asm_event, ASM_STATE_PLAYING, ASM_RESOURCE_NONE, &errorcode)) {
+        AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_PLAYING), ASM_handle(%d), ASM_event(%d), Error(0x%x)", data->asm_handle, data->asm_event, errorcode);
+        return ALC_FALSE;
+	}
+#endif
 
     data->stream = connect_playback_stream(device, flags, &data->attr, &data->spec, &chanmap);
     if(!data->stream)
@@ -990,6 +1112,7 @@ static ALCboolean pulse_reset_playback(ALCdevice *device) //{{{
 static void pulse_stop_playback(ALCdevice *device) //{{{
 {
     pulse_data *data = device->ExtraData;
+    int errorcode = MM_ERROR_NONE;
 
     if(!data->stream)
         return;
@@ -1015,6 +1138,12 @@ static void pulse_stop_playback(ALCdevice *device) //{{{
     ppa_stream_disconnect(data->stream);
     ppa_stream_unref(data->stream);
     data->stream = NULL;
+
+#ifdef USE_ASM_IN_PULSEAUDIO
+        if(!ASM_set_sound_state(data->asm_handle, data->asm_event, ASM_STATE_STOP, ASM_RESOURCE_NONE, &errorcode)) {
+            AL_PRINT("failed to ASM_set_sound_state(ASM_STATE_STOP), ASM_handle(%d), ASM_event(%d), Error(0x%x)", data->asm_handle, data->asm_event, errorcode);
+        }
+#endif
 
     ppa_threaded_mainloop_unlock(data->loop);
 } //}}}

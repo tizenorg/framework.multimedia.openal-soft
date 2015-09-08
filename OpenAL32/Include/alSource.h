@@ -7,6 +7,7 @@
 #include "alu.h"
 #include "AL/al.h"
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -109,6 +110,7 @@ typedef struct ALsource
 
     // Index to itself
     ALuint source;
+
 } ALsource;
 #define ALsource_Update(s,a)  ((s)->Update(s,a))
 
