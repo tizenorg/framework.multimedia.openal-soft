@@ -2,10 +2,7 @@
 	<request>
 		<domain name="_" />
 	</request>
-	<define>
-		<domain name="openal-soft" />
-	</define>
 	<assign>
-	    <filesystem path="/usr/bin/openal-info" exec_label="none"/>
+	    <filesystem path="/usr/bin/openal-info" label="_" exec_label="none"/>
 	</assign>
 </manifest>

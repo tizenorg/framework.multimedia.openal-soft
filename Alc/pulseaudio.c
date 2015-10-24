@@ -27,6 +27,7 @@
 #endif
 
 #include <pulse/pulseaudio.h>
+#include <pulse/ext-policy.h>
 
 #ifdef USE_ASM_IN_PULSEAUDIO
 #include <audio-session-manager.h>
@@ -107,6 +108,11 @@ MAKE_FUNC(pa_stream_set_state_callback);
 MAKE_FUNC(pa_stream_set_moved_callback);
 MAKE_FUNC(pa_stream_set_underflow_callback);
 MAKE_FUNC(pa_stream_new);
+MAKE_FUNC(pa_stream_new_with_proplist);
+MAKE_FUNC(pa_proplist_new);
+MAKE_FUNC(pa_proplist_free);
+MAKE_FUNC(pa_proplist_setf);
+MAKE_FUNC(pa_proplist_sets);
 MAKE_FUNC(pa_stream_disconnect);
 MAKE_FUNC(pa_threaded_mainloop_lock);
 MAKE_FUNC(pa_channel_map_init_auto);
@@ -125,6 +131,9 @@ MAKE_FUNC(pa_stream_set_buffer_attr_callback);
 #endif
 #if PA_CHECK_VERSION(0,9,16)
 MAKE_FUNC(pa_stream_begin_write);
+#endif
+#ifdef USE_ASM_IN_PULSEAUDIO
+MAKE_FUNC(pa_stream_is_corked);
 #endif
 #undef MAKE_FUNC
 
@@ -271,6 +280,11 @@ LOAD_FUNC(pa_stream_set_state_callback);
 LOAD_FUNC(pa_stream_set_moved_callback);
 LOAD_FUNC(pa_stream_set_underflow_callback);
 LOAD_FUNC(pa_stream_new);
+LOAD_FUNC(pa_stream_new_with_proplist);
+LOAD_FUNC(pa_proplist_new);
+LOAD_FUNC(pa_proplist_free);
+LOAD_FUNC(pa_proplist_setf);
+LOAD_FUNC(pa_proplist_sets);
 LOAD_FUNC(pa_stream_disconnect);
 LOAD_FUNC(pa_threaded_mainloop_lock);
 LOAD_FUNC(pa_channel_map_init_auto);
@@ -290,7 +304,9 @@ LOAD_OPTIONAL_FUNC(pa_stream_set_buffer_attr_callback);
 #if PA_CHECK_VERSION(0,9,16)
 LOAD_OPTIONAL_FUNC(pa_stream_begin_write);
 #endif
-
+#ifdef USE_ASM_IN_PULSEAUDIO
+LOAD_FUNC(pa_stream_is_corked);
+#endif
 #undef LOAD_OPTIONAL_FUNC
 #undef LOAD_FUNC
     }
@@ -537,6 +553,18 @@ static void stream_write_callback(pa_stream *stream, size_t len, void *pdata) //
 } //}}}
 //}}}
 
+#ifdef USE_ASM_IN_PULSEAUDIO
+static void stream_success_cb (pa_stream *s, int success, void *userdata) {
+    pulse_data *data = userdata;
+
+    if (!data)
+        return;
+
+    AL_PRINT("context_success_cb(success:%d)\n", success);
+    ppa_threaded_mainloop_signal(data->loop, 0);
+}
+#endif
+
 static ALuint PulseProc(ALvoid *param)
 {
     ALCdevice *Device = param;
@@ -554,8 +582,11 @@ static ALuint PulseProc(ALvoid *param)
             ppa_threaded_mainloop_wait(data->loop);
             continue;
         }
-
+#ifdef USE_ASM_IN_PULSEAUDIO
         while(len > 0 && !data->is_mute)
+#else
+        while(len > 0)
+#endif
         {
             size_t newlen = len;
             void *buf;
@@ -576,6 +607,23 @@ static ALuint PulseProc(ALvoid *param)
             ppa_stream_write(data->stream, buf, newlen, free_func, 0, PA_SEEK_RELATIVE);
             len -= newlen;
         }
+#ifdef USE_ASM_IN_PULSEAUDIO
+        {
+            pa_operation *o = NULL;
+            if (!data->is_mute && ppa_stream_is_corked(data->stream)) {
+                if (!(o = ppa_stream_cork(data->stream, 0, stream_success_cb, data)))
+                    AL_PRINT("failed to pa_stream_cork(0), error(%s)\n", ppa_strerror(ppa_context_errno(data->context)));
+            } else if (data->is_mute && !ppa_stream_is_corked(data->stream)) {
+                if (!(o = ppa_stream_cork(data->stream, 1, stream_success_cb, data)))
+                    AL_PRINT("failed to pa_stream_cork(1), error(%s)\n", ppa_strerror(ppa_context_errno(data->context)));
+            }
+            if (o) {
+                while (ppa_operation_get_state(o) != PA_OPERATION_DONE)
+                    ppa_threaded_mainloop_wait(data->loop);
+                ppa_operation_unref(o);
+            }
+        }
+#endif
     } while(Device->Connected && !data->killNow);
     ppa_threaded_mainloop_unlock(data->loop);
     return 0;
@@ -634,8 +682,26 @@ static pa_stream *connect_playback_stream(ALCdevice *device,
     pulse_data *data = device->ExtraData;
     pa_stream_state_t state;
     pa_stream *stream;
+    pa_proplist *p = ppa_proplist_new();
 
-    stream = ppa_stream_new(data->context, "Playback Stream", spec, chanmap);
+    if(!p)
+    {
+        AL_PRINT("pa_proplist_new() failed: %s\n",
+                 ppa_strerror(ppa_context_errno(data->context)));
+        return NULL;
+    }
+
+    ppa_proplist_setf(p, PA_PROP_MEDIA_TIZEN_VOLUME_TYPE, "%d", PA_TIZEN_VOLUME_TYPE_MEDIA);
+    ppa_proplist_setf(p, PA_PROP_MEDIA_TIZEN_GAIN_TYPE, "%d", 0);
+    ppa_proplist_sets(p, PA_PROP_MEDIA_POLICY, "auto");
+
+    stream = ppa_stream_new_with_proplist(data->context, "Playback Stream", spec, chanmap, p);
+
+    if(p)
+    {
+        ppa_proplist_free(p);
+    }
+
     if(!stream)
     {
         AL_PRINT("pa_stream_new() failed: %s\n",
@@ -794,7 +860,7 @@ static void pulse_close(ALCdevice *device) //{{{
 //}}}
 
 // OpenAL {{{
-
+#ifdef USE_ASM_IN_PULSEAUDIO
 ASM_cb_result_t asm_callback(int handle, ASM_event_sources_t event_src, ASM_sound_commands_t command, unsigned int sound_status, void* cb_data)
 {
     ASM_cb_result_t result = ASM_CB_RES_NONE;
@@ -859,19 +925,16 @@ static int _get_asm_information(ASM_sound_events_t *type, int *options)
     *options = session_options;
     return MM_ERROR_NONE;
 }
-
+#endif
 static ALCboolean pulse_open_playback(ALCdevice *device, const ALCchar *device_name) //{{{
 {
     char *pulse_name = NULL;
     pa_sample_spec spec;
     pulse_data *data = NULL;
-    int session_options = 0;
+#ifdef USE_ASM_IN_PULSEAUDIO
     int errorcode = MM_ERROR_NONE;
-
-    if(pulse_open(device, device_name) == ALC_FALSE)
-        return ALC_FALSE;
-
-    data = device->ExtraData;
+    int session_options = 0;
+#endif
 
     if(!pulse_load())
         return ALC_FALSE;
@@ -897,6 +960,11 @@ static ALCboolean pulse_open_playback(ALCdevice *device, const ALCchar *device_n
             return ALC_FALSE;
     }
 
+    if(pulse_open(device, device_name) == ALC_FALSE)
+        return ALC_FALSE;
+
+    data = device->ExtraData;
+
 #ifdef USE_ASM_IN_PULSEAUDIO
     /* read session information */
     errorcode = _get_asm_information(&data->asm_event, &session_options);
@@ -917,7 +985,6 @@ static ALCboolean pulse_open_playback(ALCdevice *device, const ALCchar *device_n
         }
     }
 #endif
-
 
     ppa_threaded_mainloop_lock(data->loop);
 
@@ -957,11 +1024,9 @@ fail:
 
 static void pulse_close_playback(ALCdevice *device) //{{{
 {
-    int errorcode = MM_ERROR_NONE;
     pulse_data *data = device->ExtraData;
-	
-	
 #ifdef USE_ASM_IN_PULSEAUDIO
+    int errorcode = MM_ERROR_NONE;
     if (data->asm_handle != -1) {
         if(!ASM_unregister_sound(data->asm_handle, data->asm_event, &errorcode)) {
             AL_PRINT("failed to ASM_unregister_sound(), asm_handle(%d), asm_event(%d), error(%x)\n", data->asm_handle, data->asm_event, errorcode);
@@ -978,7 +1043,9 @@ static ALCboolean pulse_reset_playback(ALCdevice *device) //{{{
     pulse_data *data = device->ExtraData;
     pa_stream_flags_t flags = 0;
     pa_channel_map chanmap;
+#ifdef USE_ASM_IN_PULSEAUDIO
     int errorcode = MM_ERROR_NONE;
+#endif
 
     ppa_threaded_mainloop_lock(data->loop);
 
@@ -1112,7 +1179,9 @@ static ALCboolean pulse_reset_playback(ALCdevice *device) //{{{
 static void pulse_stop_playback(ALCdevice *device) //{{{
 {
     pulse_data *data = device->ExtraData;
+#ifdef USE_ASM_IN_PULSEAUDIO
     int errorcode = MM_ERROR_NONE;
+#endif
 
     if(!data->stream)
         return;

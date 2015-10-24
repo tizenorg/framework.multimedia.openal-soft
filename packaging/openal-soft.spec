@@ -1,7 +1,7 @@
 Name:       openal-soft
 Summary:    OpenAL library software implementation
 Version:    1.13
-Release:    16
+Release:    17
 Group:      Multimedia/openal-soft
 License:    LGPL-2.0+
 Source0:    %{name}-%{version}.tar.gz
